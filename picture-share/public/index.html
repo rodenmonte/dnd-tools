@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Map</title>
+  <script src="./dom-to-image.min.js"></script>
   <style>
     * {
       color: red;
@@ -11,8 +12,8 @@
     #canvas-container{
       position:relative;
       border:1px solid black;
-      width:500px;
-      height:300px;
+      width:800px;
+      height:600px;
     }
     .subcanvs{
       position:absolute;
@@ -30,13 +31,37 @@
     <canvas id="map" class="subcanvs"></canvas>
     <canvas id="overlay" class="subcanvs"></canvas>
   </div>
-  <canvas id="canvas"></canvas>
   <div id="admin-container" class="hidden">
     <input type="file" name='image-upload' id='image-upload' accept="image/*" />
   </div>
   <img id="map-img" class='hidden' />
 
 <script>
+let socketConnected = false;
+const isAdmin = !!findGetParameter('admin');
+if (isAdmin) {
+  document.getElementById("admin-container").classList.remove('hidden');
+}
+
+const socket = new WebSocket("ws://localhost:8999");
+socket.onopen = function (event) {
+  socket.send('a client connected');
+  socketConnected = true;
+};
+
+var mapBitmap = null;
+var mapCanvas = document.getElementById("map");
+var mapCtx = mapCanvas.getContext("2d");
+var overlayCanvas = document.getElementById("overlay");
+var overlayCtx = overlayCanvas.getContext("2d");
+
+mapCtx.font = "30px Arial";
+if (isAdmin) {
+  mapCtx.fillText("Upload an image", 10, 50);
+} else {
+  mapCtx.fillText("Waiting for Admin...", 10, 50);
+}
+
 // https://stackoverflow.com/a/5448595/9398629
 function findGetParameter(parameterName) {
   var result = null,
@@ -53,11 +78,9 @@ function findGetParameter(parameterName) {
   return result;
 }
 
-drawBackground = () => {
-  console.log('I was called!')
-  console.log(document.getElementById('map-img'));
-  console.log(mapCtx);
-  mapCtx.drawImage(document.getElementById('map-img'), 0, 0, mapCanvas.width, mapCanvas.height);
+// el is an ImageBitmap
+drawBackground = el => {
+  mapCtx.drawImage(el, 0, 0, mapCanvas.width, mapCanvas.height);
 }
 
 drawOverlay = () => {
@@ -74,46 +97,59 @@ function pausecomp(millis)
 
 // https://stackoverflow.com/a/39515846/9398629
 document.getElementById('image-upload').addEventListener('change', evt => {
-var file = evt.target.files[0]; // FileList object
-
+  var file = evt.target.files[0]; // FileList object
   var reader = new FileReader();
 
   reader.onload = () => {
-    pausecomp(2000)
-    // Store the image
-    document.getElementById('map-img').src = reader.result;
-    // Blit the image to the screen
-    // mapCtx.drawImage(document.getElementById('map-img'), 0, 0, mapCanvas.width, mapCanvas.height);
-    drawBackground();
+    var image = new Image();
+    image.onload = () => {
+      Promise.all([
+        createImageBitmap(image, 0, 0, image.width, image.height, {resizeQuality: 'high'})
+      ]).then(imgBitmap => {
+        mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        drawBackground(imgBitmap[0]);
+        document.getElementById('name').innerText = 'Map';
+        overlayCtx.beginPath();
+        if (isAdmin) {
+          overlayCtx.globalAlpha = 0.6;
+        } else {
+          overlayCtx.globalAlpha = 1;
+        }
+        overlayCtx.fillStyle = "#111111";
+        overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      });
+    }
+    image.src = reader.result;
   }
   reader.readAsDataURL(file);
-  console.log(file);
 }, false);
 
-
-let socketConnected = false;
-const isAdmin = !!findGetParameter('admin');
-if (isAdmin) {
-  document.getElementById("admin-container").classList.remove('hidden');
-}
-
-const socket = new WebSocket("ws://localhost:8999");
-socket.onopen = function (event) {
-  socket.send('a client connected');
-  socketConnected = true;
+overlayCtx.fillCircle = function(x, y, radius, fillColor) {
+  this.fillStyle = fillColor;
+  this.beginPath();
+  this.moveTo(x, y);
+  this.arc(x, y, radius, 0, Math.PI * 2, false);
+  this.fill();
 };
-
-var mapCanvas = document.getElementById("map");
-var mapCtx = mapCanvas.getContext("2d");
-var overlayCanvas = document.getElementById("overlay");
-var overlayCtx = overlayCanvas.getContext("2d");
-
-mapCtx.font = "30px Arial";
-if (isAdmin) {
-  mapCtx.fillText("Upload an image", 10, 50);
-} else {
-  mapCtx.fillText("Waiting for Admin...", 10, 50);
-}
+// https://jsfiddle.net/ArtBIT/WUXDb/1/, thanks kind stranger (actually heavily modified, I don't mind taking credit for this now kek)
+overlayCanvas.onmousemove = function(e) {
+  if (!overlayCanvas.isDrawing) {
+    return;
+  }
+  var container = document.getElementById('canvas-container');
+  var scaleX = overlayCanvas.width / container.clientWidth,
+    scaleY = overlayCanvas.height / container.clientHeight;
+  var x = (e.clientX - container.offsetLeft) * scaleX,
+    y = (e.clientY - container.offsetTop) * scaleY;
+  overlayCtx.clearRect(x - 3, y - 3, 7, 7);
+};
+overlayCanvas.onmousedown = function(e) {
+  overlayCanvas.isDrawing = true;
+};
+overlayCanvas.onmouseup = function(e) {
+  overlayCanvas.isDrawing = false;
+};
 
 </script>
 </body>
