@@ -63,7 +63,12 @@ if (isAdmin) {
   document.getElementById("client-container").classList.remove('hidden');
 }
 
-const socket = new WebSocket("ws://localhost:8999");
+const url = window.location.href;
+const regex = /http(s)?:\/\/([^\/]*)\//;
+let match = regex.exec(url);
+const socketUrl = `ws://${match[2]}`;
+console.log(socketUrl)
+const socket = new WebSocket(socketUrl);
 socket.onopen = function (event) {
   socket.send('a client connected');
   socketConnected = true;
