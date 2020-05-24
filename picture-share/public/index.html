@@ -7,15 +7,15 @@
   <script src="./dom-to-image.min.js"></script>
   <style>
     * {
-      color: red;
+      color: black;
     }
-    #canvas-container{
+    #canvas-container, #canvas-container2 {
       position:relative;
       border:1px solid black;
       width:800px;
       height:600px;
     }
-    .subcanvs{
+    .subcanvs {
       position:absolute;
       width:100%;
       height:100%;
@@ -23,24 +23,44 @@
     .hidden {
       display: none;
     }
+    #clear-map {
+      color: red;
+      background: cyan;
+      border: 4px solid black;
+      margin-top: 20px;
+      font-size: 24px;
+      font-weight: bold;
+      display: block;
+    }
   </style>
 </head>
 <body>
-  <h1 id="name">No picture uploaded</h1>
-  <div id="canvas-container">
-    <canvas id="map" class="subcanvs"></canvas>
-    <canvas id="overlay" class="subcanvs"></canvas>
-  </div>
   <div id="admin-container" class="hidden">
+    <h1 id="name">No picture uploaded</h1>
+    <div id="canvas-container">
+      <canvas id="map" class="subcanvs"></canvas>
+      <canvas id="overlay" class="subcanvs"></canvas>
+    </div>
     <input type="file" name='image-upload' id='image-upload' accept="image/*" />
+    <button id="clear-map">Erase the entire map overlay</button>
+    <h1>Below is the image the players see</h1>
+    <div id="canvas-container2">
+      <canvas id="map2" class="subcanvs"></canvas>
+      <canvas id="overlay2" class="subcanvs"></canvas>
+    </div>
   </div>
-  <img id="map-img" class='hidden' />
+  <div id="client-container" class="hidden">
+    <h1 id="client-message">Waiting for admin</h1>
+    <img id="client-map" />
+  </div>
 
 <script>
 let socketConnected = false;
 const isAdmin = !!findGetParameter('admin');
 if (isAdmin) {
   document.getElementById("admin-container").classList.remove('hidden');
+} else {
+  document.getElementById("client-container").classList.remove('hidden');
 }
 
 const socket = new WebSocket("ws://localhost:8999");
@@ -49,11 +69,26 @@ socket.onopen = function (event) {
   socketConnected = true;
 };
 
-var mapBitmap = null;
+socket.onmessage = (event) => {
+  console.log('received message:')
+  // console.log(event.data)
+  if (!isAdmin && !!event.data && event.data.length > 100) {
+    console.log("Message length: " + event.data.length)
+    document.getElementById('client-map').src = event.data;
+  }
+}
+
 var mapCanvas = document.getElementById("map");
 var mapCtx = mapCanvas.getContext("2d");
 var overlayCanvas = document.getElementById("overlay");
 var overlayCtx = overlayCanvas.getContext("2d");
+
+var mapCanvas2 = document.getElementById("map2");
+var mapCtx2 = mapCanvas2.getContext("2d");
+var overlayCanvas2 = document.getElementById("overlay2");
+var overlayCtx2 = overlayCanvas2.getContext("2d");
+
+var changed = false;
 
 mapCtx.font = "30px Arial";
 if (isAdmin) {
@@ -81,11 +116,25 @@ function findGetParameter(parameterName) {
 // el is an ImageBitmap
 drawBackground = el => {
   mapCtx.drawImage(el, 0, 0, mapCanvas.width, mapCanvas.height);
+  mapCtx2.drawImage(el, 0, 0, mapCanvas.width, mapCanvas.height);
 }
 
-drawOverlay = () => {
-  console.log('overlay!')
+sendBase64OpaqueViaSocket = () => {
+  var node = document.getElementById('canvas-container2');
+
+  domtoimage.toJpeg(node, { quality: 0.6 })
+    .then(function (dataUrl) {
+        // var img = new Image();
+        // img.src = dataUrl;
+        // console.log(img)
+        socket.send(dataUrl);
+        // document.body.appendChild(img);
+    })
+    .catch(function (error) {
+        console.error('oops, something went wrong!', error);
+    });
 }
+
 
 function pausecomp(millis)
 {
@@ -107,17 +156,24 @@ document.getElementById('image-upload').addEventListener('change', evt => {
         createImageBitmap(image, 0, 0, image.width, image.height, {resizeQuality: 'high'})
       ]).then(imgBitmap => {
         mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+        mapCtx2.clearRect(0, 0, mapCanvas2.width, mapCanvas2.height);
         overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayCtx2.clearRect(0, 0, overlayCanvas2.width, overlayCanvas2.height);
+
         drawBackground(imgBitmap[0]);
         document.getElementById('name').innerText = 'Map';
+
         overlayCtx.beginPath();
-        if (isAdmin) {
-          overlayCtx.globalAlpha = 0.6;
-        } else {
-          overlayCtx.globalAlpha = 1;
-        }
-        overlayCtx.fillStyle = "#111111";
+        overlayCtx.globalAlpha = 0.6;
+        overlayCtx.fillStyle = "#000";
         overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+        overlayCtx2.beginPath();
+        overlayCtx2.globalAlpha = 1;
+        overlayCtx2.fillStyle = "#000";
+        overlayCtx2.fillRect(0, 0, overlayCanvas2.width, overlayCanvas2.height);
+
+        sendBase64OpaqueViaSocket();
       });
     }
     image.src = reader.result;
@@ -125,31 +181,42 @@ document.getElementById('image-upload').addEventListener('change', evt => {
   reader.readAsDataURL(file);
 }, false);
 
-overlayCtx.fillCircle = function(x, y, radius, fillColor) {
-  this.fillStyle = fillColor;
-  this.beginPath();
-  this.moveTo(x, y);
-  this.arc(x, y, radius, 0, Math.PI * 2, false);
-  this.fill();
-};
 // https://jsfiddle.net/ArtBIT/WUXDb/1/, thanks kind stranger (actually heavily modified, I don't mind taking credit for this now kek)
 overlayCanvas.onmousemove = function(e) {
   if (!overlayCanvas.isDrawing) {
     return;
   }
+  changed = true;
   var container = document.getElementById('canvas-container');
   var scaleX = overlayCanvas.width / container.clientWidth,
     scaleY = overlayCanvas.height / container.clientHeight;
   var x = (e.clientX - container.offsetLeft) * scaleX,
     y = (e.clientY - container.offsetTop) * scaleY;
-  overlayCtx.clearRect(x - 3, y - 3, 7, 7);
+  overlayCtx.clearRect(x - 4, y - 4, 9, 9);
+
+  var container2 = document.getElementById('canvas-container2');
+  var scaleX2 = overlayCanvas.width / container.clientWidth,
+    scaleY2 = overlayCanvas.height / container.clientHeight;
+  var x2 = (e.clientX - container.offsetLeft) * scaleX,
+    y2 = (e.clientY - container.offsetTop) * scaleY;
+  overlayCtx2.clearRect(x - 4, y - 4, 9, 9);
 };
 overlayCanvas.onmousedown = function(e) {
   overlayCanvas.isDrawing = true;
 };
 overlayCanvas.onmouseup = function(e) {
   overlayCanvas.isDrawing = false;
+  if (changed) {
+    sendBase64OpaqueViaSocket();
+  }
+  changed = false;
 };
+
+document.getElementById('clear-map').onclick = () => {
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  overlayCtx2.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  sendBase64OpaqueViaSocket();
+}
 
 </script>
 </body>

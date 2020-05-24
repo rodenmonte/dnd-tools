@@ -15,10 +15,12 @@ wss.on('connection', (ws) => {
 
     //connection is up, let's add a simple simple event
     ws.on('message', (message) => {
-
-        //log the received message and send it back to the client
-        console.log('received: %s', message);
-        ws.send(`Hello, you sent -> ${message}`);
+        console.log("Received message, broadcasting...")
+        wss.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
     });
 
     //send immediatly a feedback to the incoming connection
