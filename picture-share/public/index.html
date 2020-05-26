@@ -67,7 +67,6 @@ const url = window.location.href;
 const regex = /http(s)?:\/\/([^\/]*)\//;
 let match = regex.exec(url);
 const socketUrl = `ws://${match[2]}`;
-console.log(socketUrl)
 const socket = new WebSocket(socketUrl);
 socket.onopen = function (event) {
   socket.send('a client connected');
